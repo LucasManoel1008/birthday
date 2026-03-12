@@ -1690,6 +1690,57 @@ document.getElementById('narrator-continue-btn').addEventListener('click', () =>
   // ══════════════════════════════════════
   //  QUIZ LOGIC
   // ══════════════════════════════════════
+  let questionImageLoadRequestId = 0;
+
+  function loadQuestionImageFromCandidates(questionImage, candidates) {
+    if (!questionImage) return;
+
+    const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    if (!list.length) {
+      questionImageLoadRequestId += 1;
+      questionImage.onerror = null;
+      questionImage.onload = null;
+      questionImage.removeAttribute('src');
+      questionImage.style.display = 'none';
+      return;
+    }
+
+    const reqId = ++questionImageLoadRequestId;
+    let idx = 0;
+
+    const tryNext = () => {
+      if (reqId !== questionImageLoadRequestId) return;
+
+      if (idx >= list.length) {
+        questionImage.onerror = null;
+        questionImage.onload = null;
+        questionImage.removeAttribute('src');
+        questionImage.style.display = 'none';
+        return;
+      }
+
+      const src = list[idx++];
+      const probe = new Image();
+
+      probe.onload = () => {
+        if (reqId !== questionImageLoadRequestId) return;
+        questionImage.onerror = null;
+        questionImage.onload = null;
+        questionImage.src = src;
+        questionImage.style.display = 'block';
+      };
+
+      probe.onerror = () => {
+        if (reqId !== questionImageLoadRequestId) return;
+        tryNext();
+      };
+
+      probe.src = src;
+    };
+
+    tryNext();
+  }
+
   function loadQuestion() {
     const q = state.qs[state.idx];
     state.answered = false;
@@ -1709,12 +1760,10 @@ document.getElementById('narrator-continue-btn').addEventListener('click', () =>
     const questionImage = document.getElementById('question-image');
     if (questionImage) {
       if (q.ft) {
-        questionImage.onerror = () => {
-          questionImage.style.display = 'none';
-        };
-        questionImage.src = q.ft;
-        questionImage.style.display = 'block';
+        loadQuestionImageFromCandidates(questionImage, [q.ft]);
       } else {
+        questionImageLoadRequestId += 1;
+        questionImage.onload = null;
         questionImage.onerror = null;
         questionImage.removeAttribute('src');
         questionImage.style.display = 'none';
@@ -1808,25 +1857,7 @@ document.getElementById('narrator-continue-btn').addEventListener('click', () =>
     if (!questionImage || !question?.ft) return;
 
     const candidates = buildCompleteImageCandidates(question.ft);
-    if (!candidates.length) return;
-
-    let idx = 0;
-
-    const tryNext = () => {
-      if (idx >= candidates.length) {
-        questionImage.onerror = null;
-        questionImage.src = question.ft;
-        questionImage.style.display = 'block';
-        return;
-      }
-
-      const src = candidates[idx++];
-      questionImage.onerror = tryNext;
-      questionImage.src = src;
-      questionImage.style.display = 'block';
-    };
-
-    tryNext();
+    loadQuestionImageFromCandidates(questionImage, [...candidates, question.ft]);
   }
   
   function answer(idx) {
