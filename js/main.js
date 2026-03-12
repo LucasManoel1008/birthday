@@ -100,7 +100,7 @@ const GAME_SCORE_CONFIG = {
 const SCORE_STORAGE_KEY = 'birthday_minigame_scores_v1';
 const HOOKSHOT_CHECKPOINT_STORAGE_KEY = 'birthday_hookshot_checkpoint_v1';
 const HOOKSHOT_CHECKPOINT_INTERVAL = 3;
-const SECRET_UNLOCK_THRESHOLD = 5800;
+const SECRET_UNLOCK_THRESHOLD = 5200;
 
   const SPECIAL_CATEGORY_ROUTES = {};
   
