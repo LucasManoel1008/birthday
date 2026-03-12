@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Happy Birthday</title>
+<link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+
+<!-- =========== Começar =========== -->
+<div id="instructions-screen" class="screen active">
+  <div class="logo">
+    <button class="btn" id="game-btn">Começar</button>
+    <p class="logo-sub ">► ATIVE O SOM PARA MELHOR EXPERIÊNCIA ◄</p>
+  </div>
+</div>
+
+<!-- ══════════ Narrador ══════════ -->
+<div id="narrator-screen" class="screen">
+  <div class="narrator-avatar">
+    <img src="sprt/tenma_falando1.png" alt="Narrador" class="narrator-img" id="narrator-img">
+  </div>
+  <div class="pixel-box pixel-corner narrator-box">
+    <div class="narrator-layout">
+      <div class="narrator-text" id="narrator-text"></div>
+    </div>
+    <div class="narrator-actions">
+      <button class="btn btn-skip" id="narrator-skip-btn">Pular ›</button>
+      <button class="btn" id="narrator-continue-btn">Avançar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ Narrador - Instruções do Jogo ══════════ -->
+<div id="narrator-game-screen" class="screen">
+  <div class="narrator-avatar">
+    <img src="sprt/mtt_falando.gif" alt="Narrador" class="narrator-img" id="narrator-game-img">
+  </div>
+  <div class="pixel-box pixel-corner narrator-box">
+    <div class="narrator-layout">
+      <div class="narrator-text" id="narrator-game-text"></div>
+    </div>
+    <div class="narrator-actions">
+      <button class="btn btn-skip" id="narrator-game-skip-btn">Pular ›</button>
+      <button class="btn" id="narrator-game-continue-btn">Começar jogo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ Narrador - Kart ══════════ -->
+<div id="narrator-kart-screen" class="screen">
+  <div class="narrator-avatar">
+    <img src="sprt/madeline1.png" alt="Madeline" class="narrator-img" id="narrator-kart-img">
+  </div>
+  <div class="pixel-box pixel-corner narrator-box">
+    <div class="narrator-layout">
+      <div class="narrator-text" id="narrator-kart-text"></div>
+    </div>
+    <div class="narrator-actions">
+      <button class="btn btn-skip" id="narrator-kart-skip-btn">Pular ›</button>
+      <button class="btn" id="narrator-kart-continue-btn">Começar jogo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ Narrador - Hookshot ══════════ -->
+<div id="narrator-hookshot-screen" class="screen">
+  <div class="narrator-hookshot-whiteout" id="narrator-hookshot-whiteout" aria-hidden="true"></div>
+  <div class="narrator-avatar narrator-hookshot-stage" id="narrator-hookshot-stage">
+    <img src="sprt/zelda1.png" alt="Zelda" class="narrator-hookshot-char narrator-hookshot-zelda" id="narrator-hookshot-zelda-img">
+    <img src="sprt/mtt_princesa.png" alt="MTT Princesa" class="narrator-hookshot-char narrator-hookshot-mtt" id="narrator-hookshot-mtt-img">
+  </div>
+  <div class="pixel-box pixel-corner narrator-box">
+    <div class="narrator-layout">
+      <div class="narrator-text" id="narrator-hookshot-text"></div>
+    </div>
+    <div class="narrator-actions">
+      <button class="btn btn-skip" id="narrator-hookshot-skip-btn">Pular ›</button>
+      <button class="btn" id="narrator-hookshot-continue-btn">Continuar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ Transição (tela preta) ══════════ -->
+<div id="transition-screen" class="screen">
+</div>
+
+<!-- ══════════ Inicial ══════════ -->
+<div id="start-screen" class="screen">
+  <div class="logo">
+    <div class="logo-title">Jogo Marotão</div>
+  </div>
+
+  <div class="pixel-box global-score-box">
+    <div class="global-score-label">TOTAL (MELHORES)</div>
+    <div class="global-score-value" id="global-score-total">000000</div>
+  </div>
+
+  <div class="pixel-box best-scores-box">
+    <div class="best-scores-title">MELHOR POR JOGO</div>
+    <div class="best-scores-grid">
+      <div class="best-score-row"><span>QUIZSHOW</span><span id="best-score-geral">000000</span></div>
+      <div class="best-score-row"><span>CORRIDA KART</span><span id="best-score-kart">000000</span></div>
+      <div class="best-score-row"><span>HOOKSHOT ROOMS</span><span id="best-score-musica">000000</span></div>
+      <div class="best-score-row"><span>SECRETO</span><span id="best-score-secreto">000000</span></div>
+    </div>
+  </div>
+
+  <div class="pixel-box pixel-corner">
+    <ul class="menu-list" id="category-list">
+      <li data-cat="geral" class="selected">Quizshow   <span class="tag">FÁCIL</span></li>
+      <li data-cat="kart">Corrida de Kart <span class="tag">MÉDIO</span></li>
+      <li data-cat="hookshot">Hookshot Rooms <span class="tag">MÉDIO</span></li>
+      <li data-cat="secreto">??? <span class="tag">???</span></li>
+    </ul>
+  </div>
+
+  <button class="btn" id="start-btn">▶ START GAME</button>
+  <button class="btn inv" id="replay-intro-btn">◀ VER INTRO NOVAMENTE</button>
+</div>
+
+<!-- ══════════ HOOKSHOT ══════════ -->
+<div id="hookshot-screen" class="screen">
+  <div class="hookshot-header pixel-box">
+    <div id="hookshot-room-label">SALA 1 / 6</div>
+    <div id="hookshot-status-text">ESCAPE DA SALA</div>
+  </div>
+
+  <div class="hookshot-canvas-wrap">
+    <canvas id="hookshot-canvas" width="768" height="432"></canvas>
+    <div class="hookshot-scanlines" aria-hidden="true"></div>
+    <div class="hookshot-vignette" aria-hidden="true"></div>
+    <div class="hookshot-flash" id="hookshot-flash" aria-hidden="true"></div>
+  </div>
+
+  <div class="hookshot-actions pixel-box">
+    <div id="hookshot-action-hint">MOUSE: MIRAR | CLIQUE: GANCHO | ESPACO: PULO</div>
+    <div class="hookshot-buttons">
+      <button class="btn" id="hookshot-next-btn" style="display:none;">PROXIMA SALA</button>
+      <button class="btn" id="hookshot-restart-btn" style="display:none;">REINICIAR CAMPANHA</button>
+      <button class="btn inv" id="hookshot-menu-btn">VOLTAR AO MENU</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ KART ══════════ -->
+<div id="kart-screen" class="screen">
+  <div class="kart-header pixel-box">
+    <div id="kart-level-label">NIVEL 1 / 3</div>
+    <div id="kart-status-text">VENCA PARA AVANCAR</div>
+  </div>
+
+  <div class="kart-canvas-wrap">
+    <canvas id="kart-canvas"></canvas>
+    <div class="kart-scanlines" aria-hidden="true"></div>
+  </div>
+
+  <div class="kart-actions pixel-box">
+    <div id="kart-action-hint">SPACE ou TOQUE para acelerar</div>
+    <div class="kart-buttons">
+      <button class="btn" id="kart-next-btn" style="display:none;">PROXIMO NIVEL</button>
+      <button class="btn" id="kart-restart-btn" style="display:none;">REINICIAR CAMPANHA</button>
+      <button class="btn inv" id="kart-menu-btn">VOLTAR AO MENU</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ QUIZ ══════════ -->
+<div id="quiz-screen" class="screen">
+  <!-- HUD -->
+  <div class="hud">
+    <div class="hud-lives" id="lives-display"></div>
+    <div class="hud-q" id="q-counter">Q 0/0</div>
+    <div class="hud-score">SCORE: <span id="score-display">0</span></div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap"><div class="progress-fill" id="progress-fill"></div></div>
+
+  <!-- Question -->
+  <div class="pixel-box">
+    <div class="question-box">
+      <img id="question-image" src="" alt="Imagem da pergunta" />
+      <p id="question-text">Carregando...</p>
+    </div>
+
+    <!-- Timer -->
+    <div class="timer-row">
+      <span class="timer-label">TEMPO</span>
+      <div class="timer-bar-wrap"><div class="timer-bar" id="timer-bar"></div></div>
+      <span id="timer-val">15</span>
+    </div>
+
+    <!-- Options -->
+    <div class="options-grid" id="options-grid"></div>
+
+    <!-- Feedback -->
+    <div id="feedback"></div>
+  </div>
+</div>
+
+<!-- ══════════ Resultado ══════════ -->
+<div id="result-screen" class="screen">
+  <div class="result-title" id="result-title">GAME OVER</div>
+  <div class="result-rank"  id="result-rank">★★★★★</div>
+  <div class="pixel-box">
+    <div class="result-score" id="result-score">000</div>
+    <div style="text-align:center;font-size:8px;color:var(--gray4);margin-bottom:16px;">PONTOS</div>
+    <div class="stats-grid">
+      <div class="stat-cell"><span id="r-correct">0</span>CORRETAS</div>
+      <div class="stat-cell"><span id="r-wrong">0</span>ERRADAS</div>
+      <div class="stat-cell"><span id="r-time">0s</span>TEMPO MÉD.</div>
+      <div class="stat-cell"><span id="r-streak">0</span>MAX STREAK</div>
+    </div>
+  </div>
+  <div class="result-btns">
+    <button class="btn" id="restart-btn">↺ JOGAR NOVAMENTE</button>
+    <button class="btn inv" id="menu-btn">⌂ MENU</button>
+  </div>
+</div>
+
+<!-- ══════════ FASE SECRETA ══════════ -->
+<div id="secret-screen" class="screen">
+  <div id="secret-header" class="pixel-box">
+    <div id="secret-phase-label">FASE SECRETA</div>
+    <div id="secret-status-text">MEMÓRIAS CORROMPIDAS</div>
+    <button class="btn inv" id="secret-menu-btn" style="font-size:6px;padding:4px 10px;flex-shrink:0">✕ MENU</button>
+  </div>
+
+  <div class="hookshot-canvas-wrap">
+    <canvas id="secret-canvas"></canvas>
+    <div class="hookshot-scanlines" aria-hidden="true"></div>
+    <div class="hookshot-vignette"  aria-hidden="true"></div>
+  </div>
+
+  <div class="hookshot-actions pixel-box">
+    <div id="secret-action-hint">SETAS: MOVER | ESPAÇO: AÇÃO</div>
+  </div>
+</div>
+
+<script src="js/kart.js"></script>
+<script src="js/hookshot.js"></script>
+<script src="js/secret.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

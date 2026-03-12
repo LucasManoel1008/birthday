@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>HOOKSHOT ROOMS</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+#wrap{position:relative;display:inline-block}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:none}
+#scan{position:absolute;top:0;left:0;width:100%;height:100%;
+  background:repeating-linear-gradient(to bottom,transparent 0px,transparent 1px,rgba(0,0,0,0.32) 1px,rgba(0,0,0,0.32) 2px);
+  pointer-events:none;z-index:10}
+#vig{position:absolute;top:0;left:0;width:100%;height:100%;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,0.8) 100%);
+  pointer-events:none;z-index:11}
+#fl{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:12;opacity:0;transition:opacity 0.04s}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="768" height="432"></canvas>
+  <div id="scan"></div><div id="vig"></div><div id="fl"></div>
+</div>
+<script>
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const fl=document.getElementById('fl');
+const S=3,VW=256,VH=144;
+
+// ── B&W PALETTE ──────────────────────────────────────────────────
+const C={BK:'#000000',W0:'#ffffff',W1:'#cccccc',W2:'#888888',W3:'#444444',W4:'#1a1a1a'};
+
+// ── AUDIO ────────────────────────────────────────────────────────
+let AC=null;
+function auInit(){if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();}
+function beep(f,d,t='square',v=0.14,f2=null,delay=0){
+  if(!AC)return;
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.connect(g);g.connect(AC.destination);
+  o.type=t;const now=AC.currentTime+delay;
+  o.frequency.setValueAtTime(f,now);
+  if(f2)o.frequency.linearRampToValueAtTime(f2,now+d);
+  g.gain.setValueAtTime(v,now);g.gain.exponentialRampToValueAtTime(0.001,now+d);
+  o.start(now);o.stop(now+d);
+}
+const SFX={
+  jump:  ()=>{auInit();beep(220,0.06,'square',0.13,440);},
+  hook:  ()=>{auInit();beep(880,0.03,'square',0.09,1600);},
+  attach:()=>{auInit();beep(330,0.05,'square',0.17,180);},
+  rel:   ()=>{auInit();beep(180,0.04,'square',0.07);},
+  death: ()=>{auInit();[160,130,100,70].forEach((f,i)=>beep(f,0.1,'sawtooth',0.24,null,i*0.1));},
+  win:   ()=>{auInit();[330,440,550,660,880].forEach((f,i)=>beep(f,0.07,'square',0.15,null,i*0.06));},
+  shoot: ()=>{auInit();beep(550,0.04,'square',0.08,250);},
+  bounce:()=>{auInit();beep(140,0.05,'square',0.1,300);},
+};
+
+// ── DRAW HELPERS ─────────────────────────────────────────────────
+function vr(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(~~x*S,~~y*S,~~w*S,~~h*S);}
+function vp(x,y,c){ctx.fillStyle=c;ctx.fillRect(~~x*S,~~y*S,S,S);}
+function vtxt(str,vx,vy,c,sz,align='center'){
+  ctx.fillStyle=c;ctx.font=`${sz*S}px 'Press Start 2P',monospace`;
+  ctx.textAlign=align;ctx.textBaseline='top';ctx.fillText(str,~~vx*S,~~vy*S);
+}
+function ovlp(ax,ay,aw,ah,bx,by,bw,bh){return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by;}
+
+// ── ROOMS ────────────────────────────────────────────────────────
+// BUG FIX: player start and enemy start coords never overlap
+const ROOMS=[
+{title:'SALA 1 - O ABISMO',hint:'APONTE MOUSE NUM ANEL + CLIQUE = GANCHO!',
+ plat:[{x:0,y:0,w:256,h:8},{x:0,y:0,w:8,h:144},{x:248,y:0,w:8,h:144},
+       {x:8,y:116,w:54,h:28},{x:108,y:102,w:24,h:10},{x:192,y:116,w:56,h:28}],
+ spikes:[{x:62,y:136,w:46,h:8},{x:132,y:136,w:60,h:8}],
+ anchors:[{x:130,y:44}],exit:{x:200,y:96,w:22,h:20},start:{x:14,y:103},
+ enemies:[]},
+
+{title:'SALA 2 - ESCADARIA',hint:'USE DOIS GANCHOS SEGUIDOS PARA SUBIR!',
+ plat:[{x:0,y:0,w:256,h:8},{x:0,y:0,w:8,h:144},{x:248,y:0,w:8,h:144},
+       {x:8,y:128,w:48,h:16},{x:64,y:112,w:24,h:8},{x:104,y:96,w:24,h:8},
+       {x:148,y:80,w:24,h:8},{x:196,y:64,w:52,h:80}],
+ spikes:[{x:56,y:136,w:8,h:8},{x:88,y:136,w:16,h:8},{x:128,y:136,w:20,h:8},
+         {x:172,y:136,w:24,h:8},{x:8,y:8,w:80,h:12,ceil:1},{x:140,y:8,w:108,h:12,ceil:1}],
+ anchors:[{x:80,y:46},{x:168,y:38}],exit:{x:204,y:44,w:22,h:18},start:{x:12,y:115},
+ enemies:[{type:'walker',x:38,y:115,minX:10,maxX:48,speed:56},
+          {type:'walker',x:216,y:52,minX:196,maxX:238,speed:62},
+          {type:'bat',x:130,y:62,amp:20,spd:52,phase:0}]},
+
+{title:'SALA 3 - CHUVA DE BALAS',hint:'ESQUIVE PROJÉTEIS ENQUANTO BALANÇA!',
+ plat:[{x:0,y:0,w:256,h:8},{x:0,y:0,w:8,h:144},{x:248,y:0,w:8,h:144},
+       {x:8,y:124,w:44,h:20},{x:76,y:108,w:28,h:8},{x:152,y:108,w:28,h:8},
+       {x:212,y:124,w:36,h:20},{x:112,y:88,w:32,h:8}],
+ spikes:[{x:52,y:136,w:24,h:8},{x:104,y:136,w:48,h:8},{x:180,y:136,w:32,h:8},
+         {x:8,y:8,w:100,h:10,ceil:1},{x:148,y:8,w:100,h:10,ceil:1}],
+ anchors:[{x:100,y:44},{x:156,y:44},{x:128,y:74}],exit:{x:218,y:104,w:22,h:18},start:{x:12,y:111},
+ enemies:[{type:'cannon',x:8,y:100,angle:18,interval:1.4,timer:0.7},
+          {type:'cannon',x:248,y:100,angle:162,interval:1.6,timer:0.2},
+          {type:'walker',x:162,y:96,minX:152,maxX:172,speed:52},
+          {type:'bat',x:62,y:72,amp:24,spd:56,phase:1.0},
+          {type:'bat',x:192,y:58,amp:18,spd:66,phase:2.5}]},
+
+{title:'SALA 4 - CAVERNA DA CAVEIRA',hint:'O CHÃO É MORTE — USE O GANCHO!',
+ plat:[{x:0,y:0,w:256,h:8},{x:0,y:0,w:8,h:144},{x:248,y:0,w:8,h:144},
+       {x:8,y:132,w:14,h:12},{x:234,y:132,w:14,h:12},{x:100,y:116,w:56,h:8},
+       {x:56,y:88,w:32,h:8},{x:168,y:88,w:32,h:8},{x:108,y:60,w:40,h:8}],
+ spikes:[{x:22,y:136,w:78,h:8},{x:156,y:136,w:78,h:8},{x:88,y:136,w:68,h:8},
+         {x:8,y:8,w:240,h:12,ceil:1}],
+ anchors:[{x:52,y:66},{x:84,y:44},{x:128,y:36},{x:172,y:44}],exit:{x:116,y:40,w:24,h:18},start:{x:10,y:119},
+ enemies:[{type:'skull',x:104,y:100,vx:55,vy:-80},
+          {type:'skull',x:148,y:100,vx:-60,vy:-90},
+          {type:'walker',x:120,y:48,minX:108,maxX:140,speed:66},
+          {type:'bat',x:52,y:72,amp:22,spd:60,phase:0.5}]},
+
+{title:'SALA 5 - CATEDRAL DO CAOS',hint:'MÁXIMO CAOS — PLANEJE CADA BALANÇA!',
+ plat:[{x:0,y:0,w:256,h:8},{x:0,y:0,w:8,h:144},{x:248,y:0,w:8,h:144},
+       {x:8,y:128,w:28,h:16},{x:220,y:128,w:28,h:16},{x:44,y:108,w:36,h:8},
+       {x:176,y:108,w:36,h:8},{x:108,y:88,w:40,h:8},{x:60,y:64,w:24,h:8},
+       {x:172,y:64,w:24,h:8},{x:112,y:44,w:32,h:8}],
+ spikes:[{x:36,y:136,w:20,h:8},{x:76,y:136,w:104,h:8},{x:200,y:136,w:20,h:8},
+         {x:8,y:8,w:80,h:12,ceil:1},{x:168,y:8,w:80,h:12,ceil:1}],
+ anchors:[{x:80,y:36},{x:128,y:26},{x:176,y:36},{x:84,y:82},{x:172,y:82}],
+ exit:{x:120,y:24,w:16,h:18},start:{x:10,y:115},
+ enemies:[{type:'walker',x:194,y:96,minX:192,maxX:212,speed:72},
+          {type:'walker',x:130,y:76,minX:108,maxX:140,speed:76},
+          {type:'skull',x:62,y:52,vx:65,vy:-70},
+          {type:'skull',x:196,y:52,vx:-65,vy:-75},
+          {type:'cannon',x:8,y:80,angle:10,interval:1.0,timer:0.3},
+          {type:'cannon',x:248,y:80,angle:170,interval:1.0,timer:0.8},
+          {type:'bat',x:100,y:55,amp:10,spd:72,phase:0},
+          {type:'bat',x:160,y:55,amp:10,spd:66,phase:1.8}]},
+
+{title:'SALA 6 - REI DEMÔNIO',hint:'SEM MISERICÓRDIA. BOA SORTE, HERÓI.',
+ plat:[{x:0,y:0,w:256,h:8},{x:0,y:0,w:8,h:144},{x:248,y:0,w:8,h:144},
+       {x:8,y:136,w:16,h:8},{x:232,y:136,w:16,h:8},{x:60,y:120,w:16,h:8},
+       {x:180,y:120,w:16,h:8},{x:108,y:100,w:40,h:8},{x:48,y:76,w:20,h:8},
+       {x:188,y:76,w:20,h:8},{x:104,y:56,w:48,h:8},{x:116,y:32,w:24,h:8}],
+ spikes:[{x:24,y:136,w:36,h:8},{x:196,y:136,w:36,h:8},{x:76,y:128,w:104,h:8},
+         {x:8,y:8,w:240,h:14,ceil:1},{x:68,y:64,w:40,h:8},{x:148,y:64,w:40,h:8},
+         {x:36,y:84,w:12,h:8},{x:208,y:84,w:12,h:8}],
+ anchors:[{x:72,y:38},{x:128,y:22},{x:184,y:38},{x:56,y:66},{x:200,y:66},{x:128,y:50}],
+ exit:{x:120,y:12,w:16,h:18},start:{x:10,y:123},
+ enemies:[{type:'walker',x:66,y:108,minX:60,maxX:68,speed:82},
+          {type:'walker',x:184,y:108,minX:180,maxX:188,speed:82},
+          {type:'walker',x:122,y:88,minX:108,maxX:140,speed:86},
+          {type:'walker',x:122,y:44,minX:104,maxX:144,speed:92},
+          {type:'skull',x:54,y:62,vx:72,vy:-90},
+          {type:'skull',x:202,y:62,vx:-72,vy:-86},
+          {type:'skull',x:130,y:44,vx:56,vy:-100},
+          {type:'cannon',x:8,y:68,angle:0,interval:0.85,timer:0.0},
+          {type:'cannon',x:248,y:68,angle:180,interval:0.85,timer:0.4},
+          {type:'cannon',x:128,y:100,angle:270,interval:1.1,timer:0.2},
+          {type:'bat',x:82,y:48,amp:16,spd:82,phase:0},
+          {type:'bat',x:180,y:44,amp:16,spd:82,phase:2.1}]},
+];
+
+// ── CONSTANTS ────────────────────────────────────────────────────
+const GRV=310,JMPV=-168,MVACC=130,AIRCTR=55,FRIC=0.68;
+const HSPD=270,MROPE=104,SNAPR=13,PW=8,PH=12,BSPD=132;
+
+// ── STATE ────────────────────────────────────────────────────────
+let ri=0,lives=3,gs='playing';
+let deathT=0,time=0,hintT=6,shakeT=0,shakeAmp=0,invTimer=0;
+let particles=[],floatTexts=[],player,hook,enemies,bullets;
+
+function initRoom(idx){
+  const r=ROOMS[idx];
+  player={x:r.start.x,y:r.start.y,vx:0,vy:0,onG:false,face:1,wf:0,wt:0};
+  hook={state:'idle',x:0,y:0,vx:0,vy:0,ax:0,ay:0,rope:0};
+  // Cannons: use timer field as initial t offset so they fire staggered (not all at once)
+  // Skulls: gy removed from model — use e.vy directly, reset on bounce
+  enemies=r.enemies.map(e=>({
+    ...e, active:true,
+    t: (e.type==='cannon' && e.timer!=null) ? e.timer : 0,
+    dir:1, bx:e.x, by:e.y
+  }));
+  bullets=[];particles=[];floatTexts=[];hintT=6;invTimer=2.5;
+}
+
+// ── INPUT ────────────────────────────────────────────────────────
+const keys={};
+const mouse={vx:128,vy:72};
+document.addEventListener('keydown',e=>{
+  if(keys[e.code])return; keys[e.code]=true;
+  if(gs==='gameover'&&e.code==='Enter'){ri=0;lives=3;gs='playing';initRoom(0);return;}
+  if(gs==='complete'&&e.code==='Enter'){ri=0;lives=3;gs='playing';initRoom(0);return;}
+  if(gs==='roomwin'&&(e.code==='Enter'||e.code==='Space')){advRoom();return;}
+  if(gs!=='playing')return;
+  if(e.code==='KeyR'){initRoom(ri);return;}
+  if(e.code==='Space'||e.code==='KeyZ'){
+    if(hook.state==='attached')relHook(); else if(player.onG)doJump();
+  }
+  if((e.code==='ArrowUp'||e.code==='KeyW')&&player.onG&&hook.state!=='attached')doJump();
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;});
+canvas.addEventListener('mousemove',e=>{
+  const r=canvas.getBoundingClientRect();
+  mouse.vx=(e.clientX-r.left)*(VW/r.width);
+  mouse.vy=(e.clientY-r.top)*(VH/r.height);
+});
+canvas.addEventListener('click',e=>{
+  auInit();
+  if(gs==='gameover'){ri=0;lives=3;gs='playing';initRoom(0);return;}
+  if(gs==='complete'){ri=0;lives=3;gs='playing';initRoom(0);return;}
+  if(gs==='roomwin'){advRoom();return;}
+  if(gs!=='playing')return;
+  const rr=canvas.getBoundingClientRect();
+  mouse.vx=(e.clientX-rr.left)*(VW/rr.width);
+  mouse.vy=(e.clientY-rr.top)*(VH/rr.height);
+  fireHook();
+});
+
+function doJump(){player.vy=JMPV;SFX.jump();}
+function fireHook(){
+  if(hook.state==='attached'){relHook();return;}
+  const cx=player.x+PW/2,cy=player.y+PH/2;
+  const dx=mouse.vx-cx,dy=mouse.vy-cy;
+  const len=Math.hypot(dx,dy);if(len<1)return;
+  hook.state='flying';hook.x=cx;hook.y=cy;
+  hook.vx=(dx/len)*HSPD;hook.vy=(dy/len)*HSPD;SFX.hook();
+}
+function relHook(){hook.state='idle';SFX.rel();}
+function advRoom(){
+  // +1 life every 2 completed rooms (after room 2, 4, 6), max 3
+  if((ri+1)%2===0&&lives<3){lives++;spawnFloat(player.x+PW/2,player.y-6,'+VIDA!',C.W0);}
+  ri++;if(ri>=ROOMS.length){gs='complete';return;}gs='playing';initRoom(ri);
+}
+
+// ── PHYSICS ──────────────────────────────────────────────────────
+function resolvePlayer(plats){
+  player.onG=false;
+  for(const p of plats){
+    if(!ovlp(player.x,player.y,PW,PH,p.x,p.y,p.w,p.h))continue;
+    const ol=(player.x+PW)-p.x,or_=(p.x+p.w)-player.x;
+    const ot=(player.y+PH)-p.y,ob=(p.y+p.h)-player.y;
+    const mh=Math.min(ol,or_),mv=Math.min(ot,ob);
+    if(mv<=mh){
+      if(ot<ob){player.y=p.y-PH;if(player.vy>0)player.vy=0;player.onG=true;}
+      else{player.y=p.y+p.h;if(player.vy<0)player.vy=0;}
+    }else{
+      if(ol<or_){player.x=p.x-PW;if(player.vx>0)player.vx=0;}
+      else{player.x=p.x+p.w;if(player.vx<0)player.vx=0;}
+    }
+  }
+}
+
+// ── PARTICLES ────────────────────────────────────────────────────
+function spawnBurst(x,y,n,cols,spd=90){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,s=spd*0.4+Math.random()*spd;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-40,life:0.4+Math.random()*0.4,max:0.8,c:cols[i%cols.length],sz:1+Math.random()*2});
+  }
+}
+function spawnFloat(x,y,txt,c){floatTexts.push({x,y,txt,c,life:1.2,vy:-18});}
+function shake(a,d){shakeAmp=a;shakeT=d;}
+function flash(c,d){fl.style.background=c;fl.style.opacity='0.55';setTimeout(()=>fl.style.opacity='0',d*1000);}
+function killPlayer(){
+  if(gs!=='playing')return;
+  SFX.death();shake(3,0.35);flash('#ffffff',0.1);
+  spawnBurst(player.x+PW/2,player.y+PH/2,18,[C.W0,C.W1,C.W2],110);
+  spawnFloat(player.x+PW/2,player.y-2,'X_X',C.W0);
+  lives--;gs='dead';deathT=lives<=0?2.5:1.3;
+}
+
+// ── SPRITES ──────────────────────────────────────────────────────
+function drawPlayer(){
+  if(gs==='dead')return;
+  if(invTimer>0&&Math.floor(invTimer*10)%2===0)return; // blink
+  const x=~~player.x,y=~~player.y,f=player.face;
+  ctx.save();
+  if(f<0){ctx.translate((x+PW/2)*S*2,0);ctx.scale(-1,1);}
+  // boots
+  vr(x,y+10,3,2,C.W3);vr(x+5,y+10,3,2,C.W3);
+  // legs
+  const wl=player.onG?~~(Math.sin(player.wf)*2):0;
+  vr(x+1,y+7,2,4+wl,C.W3);vr(x+5,y+7,2,4-wl,C.W3);
+  // body
+  vr(x,y+4,PW,6,C.W1);vr(x,y+4,1,6,C.W3);vr(x+7,y+4,1,6,C.W3);
+  vr(x+2,y+8,4,1,C.W3);
+  // arms
+  if(hook.state!=='idle'){
+    const aa=Math.atan2(mouse.vy-(y+PH/2),mouse.vx-(x+PW/2));
+    vr(x+(f>0?6:0),y+5,2,2,C.W1);
+    vr(x+(f>0?6:0)+~~(Math.cos(aa)*2),y+5+~~(Math.sin(aa)*2),2,2,C.W2);
+  }else{vr(x-1,y+5,2,3,C.W1);vr(x+7,y+5,2,3,C.W1);}
+  // head
+  vr(x+1,y+1,6,4,C.W1);vr(x+1,y+1,1,4,C.W3);vr(x+6,y+1,1,4,C.W3);
+  vp(x+(f>0?5:2),y+2,C.BK);vp(x+(f>0?5:2),y+3,C.W3);
+  // hat
+  vr(x-1,y+1,PW+2,1,C.BK);vr(x+2,y-3,4,4,C.W3);vr(x+2,y-3,4,1,C.W2);
+  vp(x+(f>0?5:2),y-4,C.W0);vp(x+(f>0?5:2),y-3,C.W0);
+  ctx.restore();
+}
+
+function drawGoblin(e){
+  const x=~~e.x,y=~~e.y;
+  ctx.save();
+  if(e.dir<0){ctx.translate((x+PW/2)*S*2,0);ctx.scale(-1,1);}
+  const wl=~~(Math.sin(e.t*9)*2);
+  vr(x+1,y+8,2,4+wl,C.W3);vr(x+5,y+8,2,4-wl,C.W3);
+  vr(x,y+4,PW,5,C.W3);vr(x+2,y+4,4,2,C.W1);vr(x+2,y+7,4,1,C.W1);
+  vr(x-1,y+4,2,3,C.W3);vr(x+7,y+4,2,3,C.W3);
+  vr(x+8,y+3,2,4,C.W2);vr(x+8,y+3,2,2,C.W0);
+  vr(x+1,y,6,4,C.W3);vr(x+2,y,4,1,C.W2);
+  vp(x+2,y-2,C.W0);vp(x+2,y-1,C.W0);vp(x+5,y-2,C.W0);vp(x+5,y-1,C.W0);
+  vp(x+2,y+1,C.W0);vp(x+2,y+2,C.W0);vp(x+5,y+1,C.W0);vp(x+5,y+2,C.W0);
+  vr(x+2,y+3,4,1,C.W0);
+  ctx.restore();
+}
+
+function drawBat(e){
+  const x=~~e.x,y=~~e.y;
+  const fl2=Math.sin(time*14+e.phase)>0;
+  vr(x+2,y+2,4,4,C.W3);vr(x+3,y+2,2,2,C.W2);
+  if(fl2){vr(x-3,y,5,3,C.W3);vr(x+6,y,5,3,C.W3);}
+  else{vr(x-3,y+4,5,2,C.W3);vr(x+6,y+4,5,2,C.W3);}
+  vp(x+2,y+3,C.W0);vp(x+5,y+3,C.W0);
+  vp(x+3,y+6,C.W0);vp(x+4,y+6,C.W0);
+}
+
+function drawSkull(e){
+  const x=~~e.x,y=~~e.y;
+  vr(x+1,y,4,6,C.W0);vr(x,y+2,6,4,C.W0);vr(x+1,y+5,4,2,C.W2);
+  vr(x+1,y+2,2,2,C.BK);vr(x+3,y+2,2,2,C.BK);
+  vp(x+2,y+4,C.BK);vp(x+3,y+4,C.BK);
+  vr(x+1,y+6,1,1,C.W3);vr(x+3,y+6,1,1,C.W3);
+  vp(x+2,y+1,C.W3);
+}
+
+function drawCannon(e){
+  const bx=~~(e.x<=8?e.x:e.x-8),by=~~(e.y-5);
+  vr(bx,by,9,9,C.W3);vr(bx+1,by+1,7,7,C.W2);vr(bx+2,by+2,5,5,C.W1);
+  vp(bx+1,by+1,C.W3);vp(bx+7,by+1,C.W3);vp(bx+1,by+7,C.W3);vp(bx+7,by+7,C.W3);
+  const a=e.angle*(Math.PI/180),cx=~~e.x,cy=~~e.y;
+  for(let i=2;i<=11;i++){
+    vp(cx+~~(Math.cos(a)*i),cy+~~(Math.sin(a)*i),i<6?C.W3:C.W2);
+    vp(cx+~~(Math.cos(a)*i)+1,cy+~~(Math.sin(a)*i),C.W3);
+  }
+  if(e.t<0.07)vr(cx+~~(Math.cos(a)*11)-1,cy+~~(Math.sin(a)*11)-1,3,3,C.W0);
+}
+
+function drawBullet(b){vr(~~b.x-1,~~b.y-1,3,3,C.W0);vp(~~b.x,~~b.y,C.W3);}
+
+function drawAnchor(a,att){
+  const x=~~a.x,y=~~a.y;
+  const blink=Math.floor(time*6+a.x*0.07)%2===0;
+  const col=att?C.W0:(blink?C.W0:C.W2);
+  [[0,-5],[0,5],[-5,0],[5,0],[-4,-3],[4,-3],[-4,3],[4,3],[-3,-4],[3,-4],[-3,4],[3,4]].forEach(([ox,oy])=>vp(x+ox,y+oy,col));
+  [[0,-3],[0,3],[-3,0],[3,0],[-2,-2],[2,-2],[-2,2],[2,2]].forEach(([ox,oy])=>vp(x+ox,y+oy,att?C.W1:C.W3));
+  vr(x-1,y-1,2,2,att?C.W0:C.W1);vp(x,y,C.BK);
+  if(blink){vp(x-6,y,C.W3);vp(x+6,y,C.W3);vp(x,y-6,C.W3);vp(x,y+6,C.W3);}
+}
+
+function drawExit(e){
+  const x=~~e.x,y=~~e.y,blink=Math.floor(time*3)%2===0;
+  vr(x-1,y-1,e.w+2,e.h+2,C.W2);
+  for(let dy=0;dy<e.h;dy++)for(let dx=0;dx<e.w;dx++){
+    const chk=(dx+dy)%2===0;
+    vp(x+dx,y+dy,blink?(chk?C.W0:C.W3):(chk?C.W3:C.W4));
+  }
+  vr(x,y,e.w,1,C.W0);vr(x,y+e.h-1,e.w,1,C.W0);
+  vr(x,y,1,e.h,C.W0);vr(x+e.w-1,y,1,e.h,C.W0);
+  const cx=~~(e.x+e.w/2),cy=~~(e.y+e.h/2);
+  vp(cx,cy-2,C.W0);vp(cx,cy+2,C.W0);vp(cx-2,cy,C.W0);vp(cx+2,cy,C.W0);
+  vp(cx-1,cy-1,blink?C.W0:C.BK);vp(cx,cy,blink?C.BK:C.W0);
+  vp(cx+1,cy-1,blink?C.W0:C.BK);vp(cx-1,cy+1,blink?C.W0:C.BK);vp(cx+1,cy+1,blink?C.W0:C.BK);
+}
+
+// ── DRAW ROOM ────────────────────────────────────────────────────
+function drawRoom(r){
+  vr(0,0,VW,VH,C.BK);
+  // subtle bg noise
+  for(let i=0;i<20;i++){
+    const nx=(i*97+~~(time*3))%VW,ny=(i*67+~~(time*2))%VH;
+    vp(nx,ny,'rgba(255,255,255,0.03)');
+  }
+  // platforms
+  for(const p of r.plat){
+    vr(p.x,p.y,p.w,p.h,C.W3);
+    for(let ty=p.y;ty<p.y+p.h;ty+=4){
+      const off=((ty-p.y)/4%2)*4;
+      for(let tx=p.x+off;tx<p.x+p.w;tx+=8)vr(tx,ty,1,4,C.W4);
+      vr(p.x,ty,p.w,1,C.W4);
+    }
+    vr(p.x,p.y,p.w,1,C.W1);vr(p.x+p.w-1,p.y,1,p.h,C.W4);vr(p.x,p.y+p.h-1,p.w,1,C.W4);
+  }
+  // spikes — pure pixel-art, no canvas paths, no flicker
+  for(const s of r.spikes){
+    vr(s.x,s.y,s.w,s.h,C.W4);
+    const sw=4,cnt=Math.floor(s.w/sw);
+    for(let i=0;i<cnt;i++){
+      const sx=s.x+i*sw;
+      if(!s.ceil){
+        vr(sx+1,s.y,2,1,C.W0);
+        vr(sx,s.y+1,sw,1,C.W0);
+        if(s.h>2)vr(sx,s.y+2,sw,s.h-2,C.W0);
+        vr(sx+1,s.y+1,2,1,C.W2);
+        if(s.h>3)vr(sx+1,s.y+2,sw-2,s.h-3,C.W2);
+      }else{
+        if(s.h>2)vr(sx,s.y,sw,s.h-2,C.W0);
+        vr(sx,s.y+s.h-2,sw,1,C.W0);
+        vr(sx+1,s.y+s.h-1,2,1,C.W0);
+        if(s.h>3)vr(sx+1,s.y,sw-2,s.h-3,C.W2);
+        vr(sx+1,s.y+s.h-2,2,1,C.W2);
+      }
+    }
+  }
+  for(const a of r.anchors)drawAnchor(a,hook.state==='attached'&&hook.ax===a.x&&hook.ay===a.y);
+  drawExit(r.exit);
+}
+
+function drawHookRope(){
+  if(hook.state==='idle')return;
+  const px=player.x+PW/2,py=player.y+PH/2;
+  const tx=hook.state==='attached'?hook.ax:hook.x;
+  const ty=hook.state==='attached'?hook.ay:hook.y;
+  const segs=14,sag=hook.state==='attached'?7:0;
+  for(let i=0;i<segs;i++){
+    const t0=i/segs,t1=(i+1)/segs;
+    const rx=~~(px+(tx-px)*t0),ry=~~(py+(ty-py)*t0+Math.sin(t0*Math.PI)*sag);
+    const rx2=~~(px+(tx-px)*t1),ry2=~~(py+(ty-py)*t1+Math.sin(t1*Math.PI)*sag);
+    ctx.strokeStyle=i%2===0?C.W0:C.W3;ctx.lineWidth=S;
+    ctx.beginPath();ctx.moveTo((rx+0.5)*S,(ry+0.5)*S);ctx.lineTo((rx2+0.5)*S,(ry2+0.5)*S);ctx.stroke();
+  }
+  if(hook.state==='flying'){vr(~~hook.x-1,~~hook.y-1,3,3,C.W0);vp(~~hook.x,~~hook.y,C.BK);}
+}
+
+function drawAim(r){
+  if(hook.state!=='idle')return;
+  const px=player.x+PW/2,py=player.y+PH/2;
+  const aim=Math.atan2(mouse.vy-py,mouse.vx-px);
+  let best=null,bestD=99999;
+  for(const a of r.anchors){
+    const d=Math.hypot(a.x-px,a.y-py);if(d>MROPE+12)continue;
+    const ag=Math.atan2(a.y-py,a.x-px);let diff=Math.abs(aim-ag);
+    if(diff>Math.PI)diff=2*Math.PI-diff;
+    if(diff<0.55&&d<bestD){bestD=d;best=a;}
+  }
+  const dx=Math.cos(aim),dy=Math.sin(aim);
+  for(let d=6;d<MROPE;d+=8){if(d%16<8)vp(~~(px+dx*d),~~(py+dy*d),'rgba(255,255,255,0.2)');}
+  if(best){
+    const pk=Math.floor(time*8)%2===0;
+    [[0,-8],[0,8],[-8,0],[8,0],[6,6],[-6,6],[6,-6],[-6,-6]].forEach(([ox,oy])=>
+      vp(~~best.x+ox,~~best.y+oy,pk?C.W0:C.W2));
+  }
+  const cx=~~mouse.vx,cy=~~mouse.vy;
+  vp(cx-4,cy,C.W1);vp(cx+4,cy,C.W1);vp(cx,cy-4,C.W1);vp(cx,cy+4,C.W1);
+  vr(cx-1,cy-1,3,3,C.BK);vp(cx,cy,C.W0);
+}
+
+function drawHUD(r){
+  vr(0,0,VW,9,C.BK);vr(0,8,VW,1,C.W3);
+  vtxt(r.title,128,1,C.W0,4,'center');
+  for(let i=0;i<3;i++){
+    const hx=VW-22+i*7,hy=1,full=i<lives;
+    vr(hx,hy,5,5,full?C.W0:C.W3);
+    if(full){vp(hx,hy,C.W3);vp(hx+4,hy,C.W3);vp(hx+2,hy+4,C.W3);}
+  }
+  vtxt(`${ri+1}/${ROOMS.length}`,3,1,C.W2,4,'left');
+}
+
+function drawHint(r){
+  if(hintT<=0)return;
+  const a=Math.min(1,hintT);ctx.globalAlpha=a*a;
+  vr(0,VH-9,VW,9,C.BK);vr(0,VH-10,VW,1,C.W3);
+  vtxt(r.hint,128,VH-8,C.W2,3,'center');ctx.globalAlpha=1;
+}
+
+function drawParticles(){
+  for(const p of particles){
+    const a=Math.max(0,p.life/p.max);
+    ctx.globalAlpha=a;vr(~~p.x-~~(Math.max(1,p.sz*a)/2),~~p.y-~~(Math.max(1,p.sz*a)/2),Math.max(1,~~(p.sz*a)),Math.max(1,~~(p.sz*a)),p.c);
+  }
+  ctx.globalAlpha=1;
+  for(const f of floatTexts){ctx.globalAlpha=Math.max(0,f.life);vtxt(f.txt,~~f.x,~~f.y,f.c,4,'center');}
+  ctx.globalAlpha=1;
+}
+
+function drawDeadOverlay(){
+  vr(0,0,VW,VH,'rgba(0,0,0,0.75)');
+  vtxt('X  X',128,40,C.W0,9,'center');
+  vtxt('VOCÊ MORREU',128,62,C.W1,5,'center');
+  vtxt(`VIDAS: ${Math.max(0,lives)}`,128,78,C.W2,4,'center');
+  if(Math.floor(time*4)%2===0)vtxt('R → TENTAR DE NOVO',128,96,C.W2,3,'center');
+}
+
+function drawRoomWin(){
+  vr(0,0,VW,VH,'rgba(0,0,0,0.8)');
+  for(let i=0;i<VW;i+=8){
+    const b=Math.floor(time*6)%2;
+    vr(i+(b*4),0,4,2,i%16===0?C.W0:C.W2);
+    vr(i+((1-b)*4),VH-2,4,2,i%16===0?C.W0:C.W2);
+  }
+  vtxt('SALA COMPLETA!',128,44,C.W0,6,'center');
+  vtxt(`SALA ${ri+1} OK`,128,62,C.W1,4,'center');
+  if(ri+1<ROOMS.length){
+    if(Math.floor(time*3)%2===0)vtxt('ENTER/CLICK → PRÓXIMA',128,82,C.W0,4,'center');
+    vtxt(ROOMS[ri+1].title,128,96,C.W2,3,'center');
+  }else{
+    if(Math.floor(time*3)%2===0)vtxt('ENTER/CLICK → FIM',128,82,C.W0,4,'center');
+  }
+}
+
+function drawGameOver(){
+  vr(0,0,VW,VH,C.BK);
+  for(let i=0;i<60;i++){const nx=(i*113+~~(time*50))%VW,ny=(i*79+~~(time*40))%VH;vp(nx,ny,C.W3);}
+  vtxt('GAME',128,22,C.W0,10,'center');vtxt('OVER',128,44,C.W0,10,'center');
+  vr(20,62,216,1,C.W2);
+  vtxt(`SALA: ${ri+1}`,128,68,C.W2,4,'center');
+  if(Math.floor(time*3)%2===0)vtxt('ENTER/CLICK PARA REINICIAR',128,88,C.W1,3,'center');
+}
+
+function drawComplete(){
+  vr(0,0,VW,VH,C.BK);
+  for(let i=0;i<40;i++){const bx=(i*71+~~(time*30))%VW,by=(i*53+~~(time*18))%VH;vr(bx,by,2,1,C.W2);}
+  vr(16,22,224,1,C.W0);vr(16,64,224,1,C.W0);
+  vtxt('PARABÉNS!',128,28,C.W0,7,'center');
+  vtxt('HERÓI COMPLETO',128,42,C.W1,5,'center');
+  vtxt('6 NÍVEIS VENCIDOS!',128,70,C.W1,4,'center');
+  if(Math.floor(time*3)%2===0)vtxt('CLICK/ENTER: NOVAMENTE',128,96,C.W2,3,'center');
+}
+
+// ── UPDATE ───────────────────────────────────────────────────────
+function update(dt){
+  time+=dt;
+  if(hintT>0)hintT-=dt;
+  if(shakeT>0){shakeT-=dt;if(shakeT<0)shakeT=0;}
+  if(invTimer>0)invTimer-=dt;
+
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=220*dt;p.life-=dt;
+    if(p.life<=0)particles.splice(i,1);
+  }
+  for(let i=floatTexts.length-1;i>=0;i--){
+    const f=floatTexts[i];f.y+=f.vy*dt;f.life-=dt;if(f.life<=0)floatTexts.splice(i,1);
+  }
+
+  if(gs==='dead'){deathT-=dt;if(deathT<=0){if(lives<=0)gs='gameover';else{gs='playing';initRoom(ri);}}return;}
+  if(gs!=='playing')return;
+
+  const r=ROOMS[ri];
+  let ix=0;
+  if(keys['ArrowLeft']||keys['KeyA'])ix=-1;
+  if(keys['ArrowRight']||keys['KeyD'])ix=1;
+  if(ix!==0)player.face=ix;
+
+  // player physics
+  if(hook.state==='attached'){
+    player.vy+=GRV*dt;player.vx+=ix*AIRCTR*dt;
+    player.x+=player.vx*dt;player.y+=player.vy*dt;
+    const cx=player.x+PW/2,cy=player.y+PH/2;
+    const rdx=cx-hook.ax,rdy=cy-hook.ay,dist=Math.hypot(rdx,rdy);
+    if(dist>hook.rope){
+      const nx=rdx/dist,ny=rdy/dist;
+      player.x=hook.ax+nx*hook.rope-PW/2;player.y=hook.ay+ny*hook.rope-PH/2;
+      const rv=player.vx*nx+player.vy*ny;
+      if(rv>0){player.vx-=rv*nx;player.vy-=rv*ny;}
+    }
+    resolvePlayer(r.plat);
+  }else{
+    if(player.onG){player.vx+=ix*MVACC*dt*8;player.vx*=Math.pow(FRIC,dt*60);}
+    else player.vx+=ix*AIRCTR*dt;
+    player.vx=Math.max(-320,Math.min(320,player.vx));
+    player.vy=Math.min(player.vy+GRV*dt,450);
+    player.x+=player.vx*dt;player.y+=player.vy*dt;
+    player.x=Math.max(8,Math.min(VW-8-PW,player.x));
+    if(player.y<8){player.y=8;if(player.vy<0)player.vy=0;}
+    resolvePlayer(r.plat);
+  }
+  if(player.onG&&Math.abs(player.vx)>10){player.wt+=dt;if(player.wt>0.1){player.wt=0;player.wf+=0.5;}}
+
+  // flying hook
+  if(hook.state==='flying'){
+    hook.x+=hook.vx*dt;hook.y+=hook.vy*dt;
+    if(Math.hypot(hook.x-(player.x+PW/2),hook.y-(player.y+PH/2))>MROPE)hook.state='idle';
+    if(hook.state==='flying')for(const p of r.plat)if(hook.x>p.x&&hook.x<p.x+p.w&&hook.y>p.y&&hook.y<p.y+p.h){hook.state='idle';break;}
+    if(hook.state==='flying')for(const a of r.anchors){
+      if(Math.hypot(hook.x-a.x,hook.y-a.y)<SNAPR){
+        hook.state='attached';hook.ax=a.x;hook.ay=a.y;
+        hook.rope=Math.hypot(player.x+PW/2-a.x,player.y+PH/2-a.y);
+        spawnBurst(a.x,a.y,8,[C.W0,C.W1,C.W2],70);SFX.attach();break;
+      }
+    }
+  }
+
+  // enemies
+  for(const e of enemies){
+    if(!e.active)continue;e.t+=dt;
+    const inv=invTimer>0;
+
+    if(e.type==='walker'){
+      e.x+=e.dir*e.speed*dt;
+      if(e.x<=e.minX){e.x=e.minX;e.dir=1;}
+      if(e.x+PW>=e.maxX){e.x=e.maxX-PW;e.dir=-1;}
+      if(!inv&&ovlp(e.x,e.y,PW,PH,player.x,player.y,PW,PH))killPlayer();
+    }
+    if(e.type==='bat'){
+      if(!e.bdir)e.bdir=1;
+      e.bx+=e.bdir*e.spd*dt;
+      if(e.bx<10||e.bx>VW-18){e.bdir*=-1;e.bx=Math.max(10,Math.min(VW-18,e.bx));}
+      e.bx+=Math.sign(player.x-e.bx)*e.spd*0.18*dt;
+      e.x=e.bx;e.y=e.by+Math.sin(time*3+e.phase)*e.amp;
+      if(!inv&&ovlp(e.x,e.y,8,7,player.x,player.y,PW,PH))killPlayer();
+    }
+    if(e.type==='cannon'){
+      if(e.t>=e.interval){
+        e.t=0;const a=e.angle*(Math.PI/180);
+        bullets.push({x:e.x+Math.cos(a)*11,y:e.y+Math.sin(a)*11,vx:Math.cos(a)*BSPD,vy:Math.sin(a)*BSPD,life:3});
+        SFX.shoot();spawnBurst(e.x+Math.cos(a)*11,e.y+Math.sin(a)*11,5,[C.W0,C.W1],60);
+      }
+    }
+    if(e.type==='skull'){
+      // Clean vy-only physics: no separate gy accumulator (was causing NaN → instant disappear)
+      e.vy+=GRV*dt; e.vy=Math.min(e.vy,260); // gravity + terminal velocity cap
+      e.x+=e.vx*dt; e.y+=e.vy*dt;
+      // wall bounce
+      if(e.x<8||e.x>VW-14){e.vx*=-1;e.x=Math.max(8,Math.min(VW-14,e.x));SFX.bounce();}
+      // ceiling clamp
+      if(e.y<20){e.vy=Math.abs(e.vy)*0.5;e.y=20;}
+      // natural floor bounce (prevents teleporting)
+      if(e.y>VH-7){e.vy=-Math.min(Math.abs(e.vy)*0.7,150);if(Math.abs(e.vy)<150)e.vy=-150;e.y=VH-7;}
+      // platform bounce — only when falling downward (vy>0) to prevent tunnelling
+      let bounced=false;
+      for(const p of r.plat){
+        if(!bounced&&e.vy>0&&ovlp(e.x,e.y,6,7,p.x,p.y,p.w,p.h)){
+          e.vy=-Math.min(Math.abs(e.vy)*0.7,160);
+          if(Math.abs(e.vy)<150)e.vy=-150; // minimum 36px rise — no more crawling
+          e.y=p.y-7; e.vx+=(Math.random()-0.5)*24;
+          bounced=true;SFX.bounce();spawnBurst(e.x,e.y,4,[C.W0,C.W2],50);
+        }
+      }
+      // extreme fallback safety net
+      if(e.y>VH+20){e.vy=-150;e.y=VH-20;}
+      e.vx+=(player.x-e.x)*0.08*dt;e.vx=Math.max(-100,Math.min(100,e.vx));
+      if(!inv&&ovlp(e.x,e.y,6,7,player.x,player.y,PW,PH))killPlayer();
+    }
+  }
+
+  // bullets
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;
+    let hit=false;
+    for(const p of r.plat)if(b.x>p.x&&b.x<p.x+p.w&&b.y>p.y&&b.y<p.y+p.h){hit=true;break;}
+    if(hit||b.life<=0||b.x<0||b.x>VW||b.y<0||b.y>VH){
+      if(hit)spawnBurst(b.x,b.y,4,[C.W0,C.W1],40);bullets.splice(i,1);continue;
+    }
+    if(invTimer<=0&&ovlp(b.x-2,b.y-2,4,4,player.x,player.y,PW,PH))killPlayer();
+  }
+
+  // death
+  if(player.y>VH+20)killPlayer();
+  if(invTimer<=0)for(const s of r.spikes)if(ovlp(player.x,player.y,PW,PH,s.x,s.y,s.w,s.h)){killPlayer();break;}
+
+  // exit
+  const ex=r.exit;
+  if(ovlp(player.x,player.y,PW,PH,ex.x,ex.y,ex.w,ex.h)){
+    gs='roomwin';SFX.win();shake(2,0.4);flash('#ffffff',0.08);
+    spawnBurst(ex.x+ex.w/2,ex.y+ex.h/2,28,[C.W0,C.W1,C.W2],140);
+    spawnFloat(player.x+PW/2,player.y-4,'OK!',C.W0);
+  }
+}
+
+// ── MAIN LOOP ────────────────────────────────────────────────────
+let lastT=0;
+function loop(ts){
+  const dt=Math.min((ts-lastT)/1000,0.05);lastT=ts;update(dt);
+  ctx.save();
+  if(shakeT>0){ctx.translate(~~((Math.random()-0.5)*shakeAmp*2)*S,~~((Math.random()-0.5)*shakeAmp*2)*S);}
+  if(gs==='gameover')drawGameOver();
+  else if(gs==='complete')drawComplete();
+  else{
+    const r=ROOMS[ri];
+    drawRoom(r);drawAim(r);
+    for(const e of enemies){
+      if(!e.active)continue;
+      if(e.type==='walker')drawGoblin(e);
+      if(e.type==='bat')drawBat(e);
+      if(e.type==='cannon')drawCannon(e);
+      if(e.type==='skull')drawSkull(e);
+    }
+    for(const b of bullets)drawBullet(b);
+    drawHookRope();drawPlayer();drawParticles();drawHUD(r);drawHint(r);
+    if(gs==='dead')drawDeadOverlay();
+    if(gs==='roomwin')drawRoomWin();
+  }
+  ctx.restore();
+  requestAnimationFrame(loop);
+}
+
+initRoom(0);
+requestAnimationFrame(t=>{lastT=t;loop(t);});
+</script>
+</body>
+</html>

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KART RACER</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#000; display:flex; align-items:center; justify-content:center;
+    min-height:100vh; overflow:hidden; touch-action:none; user-select:none;
+  }
+  canvas { display:block; image-rendering:pixelated; border:4px solid #fff; box-shadow:8px 8px 0 #333; }
+  #sl {
+    position:fixed; inset:0; pointer-events:none; z-index:9;
+    background:repeating-linear-gradient(to bottom,transparent 0,transparent 3px,rgba(255,255,255,.025) 3px,rgba(255,255,255,.025) 4px);
+  }
+</style>
+</head>
+<body>
+<div id="sl"></div>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const g = c.getContext('2d');
+c.width = 720; c.height = 440;
+const W = 720, H = 440;
+
+const rsz = () => {
+  const mw = window.innerWidth-16, mh = window.innerHeight-16, rat = 720/440;
+  let w=mw, h=mw/rat;
+  if (h>mh) { h=mh; w=h*rat; }
+  c.style.width=w+'px'; c.style.height=h+'px';
+};
+rsz(); window.addEventListener('resize', rsz);
+
+// ── Constants ──────────────────────────────
+const RDIST  = 3000;
+const REF_X  = 150;
+const DSCALE = 0.19;
+const BOOST  = 2.7;
+const MSPD   = 16;
+const DECAY  = 0.937;
+const CSPD   = 6.3;
+const RT     = 90;
+const RH     = 260;
+const LH     = RH / 2;
+const S      = 3; // kart pixel size
+const SCORE_STORAGE_KEY = 'birthday_minigame_scores_v1';
+
+const GAME_SCORE_CONFIG = {
+  geral: { maxScore: 2250, enabled: true },
+  kart: { maxScore: 1000, enabled: true },
+  musica: { maxScore: 1000, enabled: false },
+  secreto: { maxScore: 1000, enabled: false }
+};
+
+function buildInitialScoreState() {
+  const games = {};
+
+  Object.keys(GAME_SCORE_CONFIG).forEach(gameId => {
+    games[gameId] = {
+      bestScore: 0,
+      maxScore: GAME_SCORE_CONFIG[gameId].maxScore,
+      updatedAt: null
+    };
+  });
+
+  return {
+    version: 1,
+    games
+  };
+}
+
+function clampScore(gameId, score) {
+  const maxScore = GAME_SCORE_CONFIG[gameId]?.maxScore ?? 0;
+  return Math.max(0, Math.min(maxScore, Math.floor(score)));
+}
+
+function getScoreState() {
+  const fallback = buildInitialScoreState();
+
+  try {
+    const raw = localStorage.getItem(SCORE_STORAGE_KEY);
+    if (!raw) return fallback;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return fallback;
+
+    const merged = buildInitialScoreState();
+    const parsedGames = parsed.games && typeof parsed.games === 'object' ? parsed.games : {};
+
+    Object.keys(merged.games).forEach(gameId => {
+      const incoming = parsedGames[gameId] || {};
+      const incomingBest = Number.isFinite(incoming.bestScore) ? incoming.bestScore : 0;
+
+      merged.games[gameId].bestScore = clampScore(gameId, incomingBest);
+      merged.games[gameId].updatedAt = typeof incoming.updatedAt === 'string' ? incoming.updatedAt : null;
+    });
+
+    return merged;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveScoreState(scoreState) {
+  try {
+    localStorage.setItem(SCORE_STORAGE_KEY, JSON.stringify(scoreState));
+  } catch {}
+}
+
+function saveBestScore(gameId, rawScore) {
+  if (!GAME_SCORE_CONFIG[gameId]) return;
+
+  const scoreState = getScoreState();
+  const nextScore = clampScore(gameId, rawScore);
+
+  if (!scoreState.games[gameId]) {
+    scoreState.games[gameId] = {
+      bestScore: 0,
+      maxScore: GAME_SCORE_CONFIG[gameId].maxScore,
+      updatedAt: null
+    };
+  }
+
+  const currentBest = scoreState.games[gameId].bestScore || 0;
+  if (nextScore > currentBest) {
+    scoreState.games[gameId].bestScore = nextScore;
+    scoreState.games[gameId].updatedAt = new Date().toISOString();
+    saveScoreState(scoreState);
+  }
+}
+
+// ── State ──────────────────────────────────
+let gs, pl, cp, pts, rOff, shX, shY, cVal, cMs, win, scoreSaved;
+
+function init() {
+  gs = 'cd'; cVal = 3; cMs = null; win = '';
+  scoreSaved = false;
+  pl = { d:0, spd:0, bnc:0 };
+  cp = { d:0, spd:CSPD };
+  pts = []; rOff = 0; shX = shY = 0;
+}
+init();
+
+// ── Input ──────────────────────────────────
+let spDown = false;
+document.addEventListener('keydown', e => {
+  if (e.code==='Space') { e.preventDefault(); if (!spDown) { spDown=true; doBoost(); } }
+  if (e.code==='Enter' && gs==='done') init();
+});
+document.addEventListener('keyup', e => { if (e.code==='Space') spDown=false; });
+c.addEventListener('pointerdown', e => { e.preventDefault(); gs==='done' ? init() : doBoost(); });
+
+function doBoost() {
+  if (gs!=='race') return;
+  pl.spd = Math.min(pl.spd + BOOST, MSPD);
+  pl.bnc = 6;
+  for (let i=0;i<6;i++)
+    addPt(REF_X-5, lY(1)+24, -Math.random()*4-1, (Math.random()-.5)*2.5, .95);
+}
+
+// ── Particles ──────────────────────────────
+function addPt(x,y,vx,vy,life) {
+  pts.push({x,y,vx,vy,life,dec:.055+Math.random()*.04,sz:2+Math.random()*5});
+}
+function tickPts() {
+  pts = pts.filter(p => {
+    p.x+=p.vx; p.y+=p.vy; p.life-=p.dec;
+    if (p.life<=0) return false;
+    g.fillStyle=`rgba(180,180,180,${p.life.toFixed(2)})`;
+    g.fillRect(p.x|0, p.y|0, p.sz|0, p.sz|0);
+    return true;
+  });
+}
+
+// ── Helpers ────────────────────────────────
+const lY = lane => RT + (lane-1)*LH + LH*.5 - 18;
+const f  = col  => { g.fillStyle = col; };
+const r  = (x,y,w,h) => g.fillRect(x|0,y|0,w|0,h|0);
+
+// ── Road ───────────────────────────────────
+function drawRoad() {
+  f('#0d0d0d'); r(0,RT-36,W,36); r(0,RT+RH,W,H-(RT+RH));
+  f('#111');   r(0,RT,W,RH);
+  f('#fff');   r(0,RT,W,4); r(0,RT+RH-4,W,4);
+  f('#3a3a3a'); r(0,RT+LH-2,W,4);
+  // scrolling dashes
+  const d1=RT+LH*.5, d2=RT+LH+LH*.5;
+  for (let i=-1;i<12;i++) {
+    const x=i*90-rOff%90;
+    f('#252525'); r(x,d1-2,50,4); r(x,d2-2,50,4);
+  }
+  // finish line
+  const fx = REF_X + (RDIST-pl.d)*DSCALE;
+  if (fx < W+20 && fx > -20)
+    for (let row=0; row<RH/10; row++)
+      for (let col=0; col<2; col++) {
+        f((row+col)%2===0?'#fff':'#000');
+        r(fx+col*8, RT+row*10, 8, 10);
+      }
+  drawScenery();
+}
+
+function drawScenery() {
+  for (let i=0;i<7;i++) {
+    const x = ((i*140 - rOff*.35) % (W+140)) - 70 | 0;
+    // streetlight (above road)
+    f('#1e1e1e'); r(x,RT-34,5,32);
+    f('#888');    r(x-5,RT-38,16,6);
+    f('#fff');    r(x-3,RT-36,3,3);
+    // pixelated tree (below road)
+    f('#222'); r(x+60,RT+RH+2,6,18);
+    f('#2d2d2d'); r(x+54,RT+RH-5,18,10);
+    f('#363636'); r(x+57,RT+RH-15,12,12);
+    f('#3d3d3d'); r(x+60,RT+RH-23,6,10);
+  }
+}
+
+// ── Kart ───────────────────────────────────
+function drawKart(x, y, isP) {
+  const b=isP?'#fff':'#bbb', dk='#000', gr='#585858', wh='#1c1c1c';
+  // ground shadow
+  g.fillStyle='rgba(255,255,255,0.05)'; r(x+S*2,y+S*10+2,S*18,S*2);
+  // exhaust pipe
+  f('#3a3a3a'); r(x-S*2,y+S*4,S*2,S*2);
+  // rear fin
+  f(b); r(x-S,y+S*2,S*2,S*5);
+  // main body
+  f(b); r(x,y+S*3,S*19,S*5);
+  // body stripe
+  f(gr); r(x+S,y+S*4+1,S*17,S);
+  // nose cone
+  f(b); r(x+S*19,y+S*3,S*3,S*5);
+  // cabin
+  f(b); r(x+S*5,y,S*9,S*4);
+  // windshield
+  f(dk); r(x+S*11,y+S,S*3,S*3);
+  // rear window
+  f(gr); r(x+S*6,y+S,S*3,S*3);
+  // roof trim
+  f('#3a3a3a'); r(x+S*5,y,S*9,S);
+  // front wheel arch + wheel
+  f(dk);  r(x+S*12,y+S*6,S*6,S*2);
+  f(wh);  r(x+S*13,y+S*7,S*4,S*3);
+  f(b);   r(x+S*14,y+S*7+2,S*2,S*2);
+  // rear wheel arch + wheel
+  f(dk);  r(x+S,y+S*6,S*6,S*2);
+  f(wh);  r(x+S*2,y+S*7,S*4,S*3);
+  f(b);   r(x+S*3,y+S*7+2,S*2,S*2);
+  // race number
+  g.fillStyle=dk;
+  g.font=`bold ${S*3}px 'Press Start 2P',monospace`;
+  g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(isP?'1':'2', x+S*8+2, y+S*2);
+  g.textBaseline='alphabetic';
+}
+
+// ── Progress Bar ───────────────────────────
+function drawBar() {
+  const bx=50, by=12, bw=W-100, bh=20;
+  f('#111'); r(bx,by,bw,bh);
+  g.strokeStyle='#fff'; g.lineWidth=2; g.strokeRect(bx,by,bw,bh);
+  mFlag(bx-20,by-2); mFlag(bx+bw+2,by-2);
+  // cpu marker
+  const cx=bx+Math.min(cp.d/RDIST,1)*bw;
+  f('#666'); r(cx-4,by-4,8,bh+8);
+  g.fillStyle='#000'; g.font='6px monospace'; g.textAlign='center';
+  g.fillText('2',cx,by+bh*.6+3);
+  // player marker
+  const px=bx+Math.min(pl.d/RDIST,1)*bw;
+  f('#fff'); r(px-5,by-5,10,bh+10);
+  g.fillStyle='#000'; g.font='7px monospace'; g.textAlign='center';
+  g.fillText('1',px,by+bh*.6+4);
+  // labels
+  g.fillStyle='#3a3a3a'; g.font='6px monospace';
+  g.textAlign='left';  g.fillText('START',  bx,   by+bh+14);
+  g.textAlign='right'; g.fillText('FINISH', bx+bw,by+bh+14);
+}
+function mFlag(x,y) {
+  for(let rr=0;rr<4;rr++) for(let cc=0;cc<4;cc++) {
+    f((rr+cc)%2===0?'#fff':'#000'); r(x+cc*4,y+rr*4,4,4);
+  }
+}
+
+// ── HUD ────────────────────────────────────
+function drawHUD() {
+  // Speed gauge
+  const gx=14, gy=H-74, gw=130, gh=60;
+  f('#000'); r(gx,gy,gw,gh);
+  g.strokeStyle='#fff'; g.lineWidth=2; g.strokeRect(gx,gy,gw,gh);
+  g.fillStyle='#4a4a4a'; g.font='6px monospace'; g.textAlign='center';
+  g.fillText('VELOCIDADE', gx+gw/2, gy+13);
+  const pct=pl.spd/MSPD, bw2=gw-20;
+  g.strokeStyle='#2a2a2a'; g.lineWidth=1; g.strokeRect(gx+10,gy+20,bw2,12);
+  f('#fff'); r(gx+10,gy+20,bw2*pct,12);
+  // segment dividers
+  for(let i=1;i<8;i++) { f('#000'); r(gx+10+(bw2*i/8)-1,gy+20,2,12); }
+  g.fillStyle='#fff'; g.font='10px monospace'; g.textAlign='center';
+  g.fillText(Math.round(pct*200)+' KM/H', gx+gw/2, gy+50);
+
+  // Position indicator
+  const pos = pl.d>=cp.d ? '1ST' : '2ND';
+  const px2=W-94, py2=H-74;
+  f('#000'); r(px2,py2,80,60);
+  g.strokeStyle='#fff'; g.lineWidth=2; g.strokeRect(px2,py2,80,60);
+  g.fillStyle='#4a4a4a'; g.font='6px monospace'; g.textAlign='center';
+  g.fillText('POSIÇÃO', px2+40, py2+13);
+  g.fillStyle='#fff'; g.font='18px monospace'; g.textAlign='center';
+  g.fillText(pos, px2+40, py2+46);
+
+  // Space hint — pulse when near max speed
+  const pulse = pl.spd < 2 && gs==='race';
+  g.fillStyle = pulse && Math.floor(Date.now()/300)%2===0 ? '#fff' : '#2c2c2c';
+  g.font='6px monospace'; g.textAlign='center';
+  g.fillText('[SPACE] / TAP — ACELERAR', W/2, H-6);
+}
+
+// ── Countdown ──────────────────────────────
+function drawCd(now) {
+  f('rgba(0,0,0,0.55)'); r(0,0,W,H);
+  const lbl = cVal>0 ? String(cVal) : 'GO!';
+  const pulse = cVal>0 ? 1+.12*Math.sin(now/110*Math.PI) : 1.12;
+  g.font=`${(50*pulse)|0}px 'Press Start 2P',monospace`;
+  g.textAlign='center'; g.textBaseline='middle';
+  f('#2a2a2a'); g.fillText(lbl,W/2+5,H/2+5);
+  f('#fff');    g.fillText(lbl,W/2,  H/2);
+  g.textBaseline='alphabetic';
+}
+
+// ── Finish screen ──────────────────────────
+function drawDone() {
+  f('rgba(0,0,0,0.80)'); r(0,0,W,H);
+  const isW=win==='pl';
+  const bw=480, bh=220, bx=(W-bw)/2, by=(H-bh)/2;
+  f('#000'); r(bx,by,bw,bh);
+  g.strokeStyle='#fff'; g.lineWidth=4; g.strokeRect(bx,by,bw,bh);
+  g.strokeStyle='#333'; g.lineWidth=2; g.strokeRect(bx+8,by+8,bw-16,bh-16);
+  // trophy / skull pixel art
+  if (isW) drawTrophy(bx+bw-70, by+bh/2-18);
+  else     drawSkull(bx+38, by+bh/2-18);
+  g.textAlign='center'; g.textBaseline='middle';
+  g.fillStyle='#fff'; g.font=`22px 'Press Start 2P',monospace`;
+  g.fillText(isW?'★ VITÓRIA! ★':'DERROTA...', W/2, by+64);
+  g.fillStyle='#666'; g.font=`9px 'Press Start 2P',monospace`;
+  g.fillText(isW?'EXCELENTE PILOTAGEM!':'O CPU GANHOU DESTA VEZ', W/2, by+108);
+  if (Math.floor(Date.now()/500)%2===0) {
+    g.fillStyle='#fff'; g.font=`7px 'Press Start 2P',monospace`;
+    g.fillText('► ENTER / TOQUE PARA TENTAR NOVAMENTE ◄', W/2, by+168);
+  }
+  g.textBaseline='alphabetic';
+}
+
+function drawTrophy(x,y) {
+  const T=4;
+  const rows=[
+    '...XXX...','.XXXXX..','.XXXXX..','.X.X.X..',
+    '..XXX...','...X....','..XXX...','XXXXXXX..',
+  ];
+  rows.forEach((row,i) => [...row].forEach((ch,j) => {
+    if (ch==='X') { f('#aaa'); r(x+j*T,y+i*T,T,T); }
+  }));
+}
+
+function drawSkull(x,y) {
+  const T=4;
+  const rows=[
+    '..XXX..','XXXXXXX','X.X.X.X','XXXXXXX',
+    '.XXXXX.','..X.X..','..X.X..',
+  ];
+  rows.forEach((row,i) => [...row].forEach((ch,j) => {
+    if (ch==='X') { f('#555'); r(x+j*T,y+i*T,T,T); }
+  }));
+}
+
+// ── Game Loop ──────────────────────────────
+function loop(now) {
+  requestAnimationFrame(loop);
+
+  // ── Update
+  if (gs==='cd') {
+    if (!cMs) cMs=now;
+    if (cVal>0 && now-cMs>=900) { cMs=now; cVal--; }
+    else if (cVal===0 && now-cMs>=700) gs='race';
+  } else if (gs==='race') {
+    pl.spd *= DECAY;
+    pl.d   += pl.spd;
+    pl.bnc  = Math.max(0, pl.bnc-.65);
+    // CPU with subtle speed variation
+    const tgt = CSPD + Math.sin(now/900)*1.8 + Math.cos(now/340)*.6;
+    cp.spd += (tgt-cp.spd)*.04;
+    cp.d   += cp.spd;
+    // CPU exhaust
+    const csx = REF_X + (cp.d-pl.d)*DSCALE;
+    if (Math.random()>.65) addPt(csx-4, lY(2)+24, -Math.random()*2-.4, (Math.random()-.5)*.8, .4);
+    // Road scroll
+    rOff += pl.spd*.72;
+    // Screen shake
+    if (pl.spd>11) { shX=(Math.random()-.5)*2.5; shY=(Math.random()-.5)*1.5; }
+    else { shX*=.7; shY*=.7; }
+    // Check finish
+    if (pl.d>=RDIST || cp.d>=RDIST) {
+      win = pl.d>=RDIST ? 'pl' : 'cp';
+      if (!scoreSaved) {
+        saveBestScore('kart', win === 'pl' ? 1000 : 0);
+        scoreSaved = true;
+      }
+      gs='done';
+    }
+  }
+
+  // ── Draw
+  g.save();
+  if (gs==='race') g.translate(shX|0, shY|0);
+
+  f('#000'); r(0,0,W,H);
+  drawBar();
+  drawRoad();
+
+  // CPU kart
+  const csx2 = REF_X + (cp.d-pl.d)*DSCALE;
+  drawKart(csx2-33, lY(2), false);
+  // Player kart with bounce
+  drawKart(REF_X-33, (lY(1)-pl.bnc)|0, true);
+
+  tickPts();
+  g.restore();
+
+  if (gs==='race'||gs==='done') drawHUD();
+  if (gs==='cd') drawCd(now);
+  if (gs==='done') drawDone();
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
